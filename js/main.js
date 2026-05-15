@@ -16,6 +16,52 @@ const contextMenu = document.getElementById('context-menu');
 const saveStatusDot = document.getElementById('save-status-dot'); // 追加: ステータス表示用
 const saveStatusText = document.getElementById('save-status-text'); // 追加: ステータス表示用
 
+// --- Sound Engine (Procedural) ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playSound(type) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+
+    if (type === 'add') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.exponentialRampToValueAtTime(880, now + 0.1);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now);
+        osc.stop(now + 0.1);
+    } else if (type === 'delete') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(220, now);
+        osc.frequency.exponentialRampToValueAtTime(110, now + 0.2);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+        osc.start(now);
+        osc.stop(now + 0.2);
+    } else if (type === 'click') {
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(660, now);
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+        osc.start(now);
+        osc.stop(now + 0.05);
+    } else if (type === 'arrange') {
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, now);
+        osc.frequency.linearRampToValueAtTime(660, now + 0.5);
+        gain.gain.setValueAtTime(0.1, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+        osc.start(now);
+        osc.stop(now + 0.5);
+    }
+}
+
 // --- Persistence Logic ---
 async function saveAllToCloud() {
     const data = taskObjects.map(obj => ({
@@ -122,7 +168,10 @@ function init() {
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('contextmenu', onContextMenu); // 右クリック追加
     window.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('click', () => contextMenu.style.display = 'none');
+    window.addEventListener('click', () => {
+        contextMenu.style.display = 'none';
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+    });
     
     window.addEventListener('auth-ready', loadFromCloud);
 
@@ -152,10 +201,19 @@ function setupInput() {
             hiddenInput.value = '';
             inputDisplay.innerHTML = `<span class="text-slate-600 italic">新しいタスクを入力...</span><span class="cursor-blink"></span>`;
             saveAllToCloud();
+            playSound('add');
         }
     });
 
-    document.getElementById('export-btn').addEventListener('click', exportToExcel);
+    document.getElementById('export-btn').addEventListener('click', () => {
+        exportToExcel();
+        playSound('click');
+    });
+
+    document.getElementById('arrange-btn').addEventListener('click', () => {
+        arrangeTasks();
+        playSound('arrange');
+    });
 }
 
 function createTextTexture(text, color = '#38bdf8') {
@@ -215,6 +273,26 @@ function addTask(text, createdAt = null, pos = null, id = null, color = '#38bdf8
     if (!pos) saveAllToCloud();
 }
 
+function arrangeTasks() {
+    const cols = 2;
+    const spacingX = 9;
+    const spacingY = 2.5;
+    
+    taskObjects.forEach((obj, i) => {
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        
+        const targetX = (col - (cols - 1) / 2) * spacingX;
+        const targetY = 5 - (row * spacingY);
+        
+        obj.mesh.position.x = targetX;
+        obj.targetY = targetY;
+        obj.mesh.position.z = 0; // Zをリセット
+    });
+    
+    saveAllToCloud();
+}
+
 function onContextMenu(e) {
     e.preventDefault();
     
@@ -231,6 +309,7 @@ function onContextMenu(e) {
         contextMenu.style.display = 'block';
         contextMenu.style.left = `${e.clientX}px`;
         contextMenu.style.top = `${e.clientY}px`;
+        playSound('click');
     } else {
         contextMenu.style.display = 'none';
     }
@@ -248,6 +327,7 @@ window.deleteTargetTask = function() {
     contextMenu.style.display = 'none';
     toast("タスクを削除しました");
     saveAllToCloud();
+    playSound('delete');
 };
 
 window.editTargetTask = function() {
@@ -259,6 +339,7 @@ window.editTargetTask = function() {
         menuTargetTask.mesh.material.map = createTextTexture(menuTargetTask.text, menuTargetTask.color);
         toast("タスクを更新しました");
         saveAllToCloud();
+        playSound('add');
     }
     contextMenu.style.display = 'none';
 };
@@ -272,6 +353,7 @@ window.changeColor = function(newColor) {
     
     contextMenu.style.display = 'none';
     saveAllToCloud();
+    playSound('click');
 };
 
 function onMouseMove(e) {
@@ -306,6 +388,7 @@ function onMouseDown() {
         const intersectPoint = new THREE.Vector3();
         raycaster.ray.intersectPlane(plane, intersectPoint);
         offset.copy(intersectPoint).sub(draggedObject.mesh.position);
+        playSound('click');
     } else {
         if (selectedObject) selectedObject.mesh.material.emissiveIntensity = 0.2;
         selectedObject = null;
