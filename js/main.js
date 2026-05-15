@@ -1,5 +1,5 @@
 // --- Configuration & State ---
-let scene, camera, renderer, raycaster, mouse;
+let scene, camera, renderer, raycaster, mouse, composer;
 const taskObjects = [];
 let selectedObject = null;
 let draggedObject = null;
@@ -49,7 +49,7 @@ async function loadFromCloud() {
         const localData = localStorage.getItem('3d_tasks_local');
         if (localData) {
             const data = JSON.parse(localData);
-            data.forEach(t => addTask(t.text, t.createdAt, t.pos, t.id));
+            data.forEach(t => addTask(t.text, t.createdAt, t.pos, t.id, t.color));
         }
         isInitialLoadComplete = true;
         updateStatus(true);
@@ -87,7 +87,19 @@ function init() {
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ReinhardToneMapping;
     document.body.appendChild(renderer.domElement);
+
+    // Post-processing setup
+    const renderScene = new THREE.RenderPass(scene, camera);
+    const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+    bloomPass.threshold = 0.2;
+    bloomPass.strength = 0.8;
+    bloomPass.radius = 0.5;
+
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(renderScene);
+    composer.addPass(bloomPass);
 
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
@@ -120,7 +132,7 @@ function init() {
 
 function setupInput() {
     document.body.addEventListener('click', (e) => {
-        if (!e.target.closest('button')) hiddenInput.focus();
+        if (!e.target.closest('button') && !e.target.closest('#context-menu')) hiddenInput.focus();
     });
 
     hiddenInput.addEventListener('focus', () => inputContainer.classList.add('focused'));
@@ -175,7 +187,7 @@ function addTask(text, createdAt = null, pos = null, id = null, color = '#38bdf8
     const material = new THREE.MeshPhongMaterial({
         map: createTextTexture(text, color),
         emissive: color,
-        emissiveIntensity: 0.1,
+        emissiveIntensity: 0.2,
         transparent: true,
         opacity: 0.95
     });
@@ -238,6 +250,19 @@ window.deleteTargetTask = function() {
     saveAllToCloud();
 };
 
+window.editTargetTask = function() {
+    if (!menuTargetTask) return;
+    
+    const newText = window.prompt("タスク内容を編集:", menuTargetTask.text);
+    if (newText !== null && newText.trim() !== "") {
+        menuTargetTask.text = newText.trim();
+        menuTargetTask.mesh.material.map = createTextTexture(menuTargetTask.text, menuTargetTask.color);
+        toast("タスクを更新しました");
+        saveAllToCloud();
+    }
+    contextMenu.style.display = 'none';
+};
+
 window.changeColor = function(newColor) {
     if (!menuTargetTask) return;
     
@@ -272,7 +297,7 @@ function onMouseDown() {
         const hit = intersects[0].object;
         const obj = taskObjects.find(o => o.mesh === hit);
         
-        if (selectedObject) selectedObject.mesh.material.emissiveIntensity = 0.1;
+        if (selectedObject) selectedObject.mesh.material.emissiveIntensity = 0.2;
         selectedObject = obj;
         selectedObject.mesh.material.emissiveIntensity = 0.8;
         draggedObject = obj;
@@ -282,7 +307,7 @@ function onMouseDown() {
         raycaster.ray.intersectPlane(plane, intersectPoint);
         offset.copy(intersectPoint).sub(draggedObject.mesh.position);
     } else {
-        if (selectedObject) selectedObject.mesh.material.emissiveIntensity = 0.1;
+        if (selectedObject) selectedObject.mesh.material.emissiveIntensity = 0.2;
         selectedObject = null;
     }
 }
@@ -308,6 +333,7 @@ function onResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function animate() {
@@ -329,7 +355,7 @@ function animate() {
         camera.position.y += ((-mouse.y * 1.5) - camera.position.y) * 0.05;
     }
     camera.lookAt(0, 0, 0);
-    renderer.render(scene, camera);
+    composer.render();
 }
 
 function exportToExcel() {
